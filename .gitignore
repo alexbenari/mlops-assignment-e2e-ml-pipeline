@@ -1,3 +1,9 @@
 .venv
 .env
-trajectories/
+/trajectories/
+/trajectory.json
+
+/logs/
+
+mini-swe-agent/
+SWE-bench/
