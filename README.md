@@ -86,12 +86,7 @@ If done carefully, this assignment teaches the practical MLOps discipline that r
 - A CPU VM with 8 CPU, 32 GB RAM, public IP. Can be created in Nebius.
 - `NEBIUS_API_KEY` for Nebius Token Factory
 
-
 You do not need a GPU VM for the orchestration parts. The inference part is handled by managed APIs.
-
----
-
-## Phase 0: Setup
 
 Create a VM with 8 CPU, 32 GB RAM, public IP. Add your public SSH key.
 
@@ -163,12 +158,12 @@ Add your `NEBIUS_API_KEY` to `.env`.
   - Run the Airflow: `bash run-airflow-standalone`
   - Forward port `8080` -- this is where Airflow is running.
     - VSCode/Cursor may do it automatically for you.
-    - Pain SSH: `ssh -L 8080:localhost:8080 <user>@<vm-host>`.
+    - Plain SSH: `ssh -L 8080:localhost:8080 <user>@<vm-host>`.
   - Open it: http://localhost:8080
   - Try running the example DAG `mini-swe-bench-single`.
 
 
-Congratulations! Your are all set.
+Congratulations! You are all set.
 
 ## Final Deliverables
 
@@ -176,23 +171,22 @@ By the end of the mandatory assignment, your repo should contain:
 
 | File or directory | What it is |
 |---|---|
-| `REPORT.md` | Final writeup |
-| `infra/` or `docker-compose.yml` | Remote VM deployment for Airflow, MLflow, trajectory viewer, and code sync |
-| `dags/evaluate_agent.py` | Configurable evaluation DAG |
-| `src/` or `pipeline/` | Shared implementation code, operators, provider clients, config schemas |
-| `configs/` | Reproducible configs for all evaluation runs, including execution image references |
-| `.env.example` | Non-secret environment template for required services |
-| `results/evaluate_agent_baseline.json` | Baseline evaluation result |
-| `results/evaluate_agent_experiments.json` | Prompt and temperature experiment summary |
-| `artifacts/` or external artifact URI references | Durable run evidence: task outputs, logs, trajectory references, or manifests |
-| `screenshots/airflow_evaluate_agent.png` | Evaluation DAG run |
-| `screenshots/mlflow_evaluate_agent.png` | MLflow comparison view for evaluation runs |
-| `screenshots/mlflow_run_artifacts.png` | MLflow run with metrics, params, and artifacts |
-| `screenshots/trajectory_viewer.png` | Trajectory viewer with an inspected mini-swe-agent run |
+| `REPORT.md` | Final writeup with architecture, run instructions, experiment results, artifact layout, and rerun notes |
+| `docker-compose.yaml` | VM deployment for Airflow and MLflow |
+| `Dockerfile` | Execution image used by Airflow `DockerOperator` tasks |
+| `dags/` | Configurable Airflow DAG for `run-mini-swe-agent -> swe-bench-eval -> log-artifacts-to-s3 -> log-metrics-to-mlflow` |
+| `scripts/` | Runnable agent and evaluation entrypoints used by the DAG |
+| `.env.example` | Non-secret environment template for Airflow, MLflow, S3/Object Storage, and inference credentials |
+| `runs/` manifest or sample run folder | Structured run evidence, for example `runs/<run-id>/run-agent/...` and `runs/<run-id>/run-eval/...` |
+| S3/Object Storage references | Long-term artifact location for full run outputs |
+| MLflow experiment runs | Logged parameters, metrics, run IDs, and artifact references for completed evaluations |
+| `screenshots/airflow_dag.png` | Airflow UI showing the completed evaluation pipeline |
+| `screenshots/mlflow_runs.png` | MLflow UI showing logged evaluation runs and metrics |
+| `screenshots/object_storage_artifacts.png` | Object Storage UI, CLI output, or equivalent evidence showing uploaded run artifacts |
 
-If artifacts are too large to commit, commit small indexes or manifests that point to their storage location.
+The repository should be enough to deploy the stack on a fresh VM, trigger an evaluation from Airflow parameters, and find the complete evidence for a run by its `run-id`.
 
-Optional extension deliverables may include `dags/train_model.py`, `dags/train_model_and_evaluate_agent.py`, `results/fine_tuning_experiments.json`, and `screenshots/mlflow_fine_tuning.png`.
+If full artifacts are too large to commit, commit a small manifest or example folder and include the remote artifact URI in `REPORT.md`.
 
 ---
 
@@ -202,11 +196,10 @@ We care more about engineering judgment and traceability than about one lucky me
 
 | Area | Weight | What a strong submission shows |
 |---|---:|---|
-| **Remote Airflow deployment** | 15% | Airflow runs on a VM, DAG code updates automatically from Git/S3, and the setup can be reproduced without manual file edits on the VM. |
-| **Docker execution model** | 15% | Pipeline actions run in user-provided Docker images, with image references controlled by config or another clear user-facing mechanism. |
-| **Evaluation pipeline** | 25% | Configurable `evaluate-agent`, durable task-level evidence, SWE-bench-compatible judging, meaningful aggregate metrics, and no hidden giant script. |
-| **MLflow tracking** | 15% | Runs log configs, metrics, artifacts or artifact references, code/data/model metadata, and comparison views for the experiments. |
-| **Trajectory inspection** | 10% | mini-swe-agent trajectory viewer is deployed and used to inspect successful and failed runs. |
-| **Experiment rigor** | 10% | Baseline, prompt, and temperature experiments are comparable, reproducible, and interpreted honestly. |
-| **Report and runbook** | 10% | `REPORT.md` is concise, includes rerun instructions, explains failures, and states what would be improved next. |
+| **Configurable Airflow DAG** | 35% | The DAG implements the `run-agent -> run-evaluation` workflow, exposes `split`, `subset`, and `worker` as parameters, avoids hard-coded experiment values, and can be triggered reliably from the Airflow UI. A strong standalone Airflow solution is acceptable here. |
+| **Artifact structure and reproducibility** | 20% | Each run writes a structured `runs/<run-id>/` tree and includes enough inputs, outputs, trajectories, predictions, logs, and reports to reconstruct the run. Extra credit within this area for uploading artifacts to S3/Object Storage. |
+| **MLflow tracking** | 15% | Runs log parameters, metrics, run IDs, and artifact references so multiple evaluations can be compared in the MLflow UI. |
+| **Execution isolation** | 10% | Agent and evaluation work run in a documented, repeatable environment. `DockerOperator` with the project `Dockerfile` is the preferred production-style solution, but a clear standalone Airflow implementation without `DockerOperator` can still receive most of the credit if it is reproducible. |
+| **Docker Compose deployment** | 10% | Airflow and MLflow can run from `docker-compose.yaml` with documented setup and required environment variables. The Compose deployment should support the pipeline rather than become the main point of the assignment. |
+| **Report and reproducibility** | 10% | `REPORT.md` explains the architecture, how to trigger a run, where artifacts live, how to rerun by `run-id`, and what happened in at least one completed evaluation. |
 
