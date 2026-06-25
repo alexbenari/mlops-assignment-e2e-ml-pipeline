@@ -13,19 +13,16 @@ prepare_run ──► run_agent ──► run_eval ──► summarize_and_log
 
 Two layers, deliberately separated:
 
-- **Orchestration (Airflow's interpreter).** The DAG and the light helpers in
-  `dags/pipeline/` (stdlib only) read params, build the run config, create the run dir,
-  parse results, and log to MLflow. They never import `swebench` / `minisweagent`.
+- **Orchestration (Airflow).** The DAG and the light helpers in
+  `dags/pipeline/`. They read params, build the run config, create the run dir,
+  parse results, and log to MLflow. They do not import `swebench` / `minisweagent`.
 - **Workload (the project environment).** The agent and the evaluation run in the
-  project `.venv` (or, production-style, the `mlops-eval:local` image) via the scripts in
+  `mlops-eval:local` image via the scripts in
   `scripts/`. This is the heavy code with the ML dependencies.
 
-The boundary exists because Airflow runs in its own environment (the `uvx` env for
-standalone, or the `apache/airflow` image for compose), which does **not** contain the
-workload dependencies. The orchestration layer therefore **shells out** to the workload —
-`subprocess` to the scripts (standalone) or **`DockerOperator`** launching `mlops-eval:local`
-(production). The same `scripts/*.sh` are used in both modes (and are `COPY`'d into the
-Docker image), so there's one source of truth for "how to run the agent/eval".
+Airflow runs in its own environment, the `apache/airflow` image. It does **not** contain the
+workload dependencies. The orchestration layer performs the workload operations through **`DockerOperator`** launching `mlops-eval:local`. This is done through the `scripts/*.sh` files (which are `COPY`'d into the
+Docker image). This is the single source of truth for "how to run the agent/eval".
 
 ### Components
 
@@ -47,9 +44,13 @@ Docker image), so there's one source of truth for "how to run the agent/eval".
 | `run_eval` | DockerOperator | Evaluate `preds.json` with SWE-bench → `run-eval/{logs/, <model>.<run-id>.json}` |
 | `summarize_and_log` | Python | Parse reports → `metrics.json`; write `manifest.json`; log to MLflow |
 
-All tasks have `retries=1` (exponential backoff) and per-task `execution_timeout`
-(agent 4h, eval 2h, prepare 5m, summarize 10m). `run_agent` is retry-safe because the
-batch resumes from an existing `preds.json`.
+Tasks retry once (`retries=1`, exponential backoff) except `prepare_run` (`retries=0` — a
+failure there is a real bug, not transient). Each has a per-task `execution_timeout`
+(agent 4h, eval 2h, prepare 5m, summarize 10m). Retries are safe: `run_agent` resumes from
+an existing `preds.json`, and `summarize_and_log`'s MLflow logging is idempotent (a retry
+reuses the same run instead of duplicating it). `prepare_run` also runs pre-flight
+validation (NEBIUS_API_KEY present, params sane) and raises `AirflowFailException` on a bad
+config, so misconfigurations fail fast before the expensive Docker tasks run.
 
 ## Configuration (DAG params)
 
@@ -90,10 +91,12 @@ A committed example lives at `runs/20260625-155405-0af1496f/`.
 ```bash
 cp .env.example .env          # add your NEBIUS_API_KEY
 uv sync
+docker build -t mlops-eval:local .             # workload image (run_agent/run_eval use DockerOperator in both modes)
 uv tool run mlflow server --port 5000          # MLflow (separate terminal)
 bash run-airflow-standalone.sh                 # Airflow at http://localhost:8080 (admin/admin)
 ```
 Trigger `evaluate_agent` from the UI with e.g. `{"task_slice": "0:1", "workers": 1}`.
+(Docker must be running — both deployments launch the agent/eval as containers.)
 
 ### B) docker-compose (production-style)
 ```bash
@@ -143,7 +146,7 @@ Evidence: `screenshots/airflow_dag.png` (all four tasks green) and
   A blank `run_id` auto-generates a fresh one; reusing a `run_id` resumes the agent batch
   (it skips instances already in `preds.json`).
 
-## Remote storage (S3) — not enabled, here's the plan
+## Remote storage (S3) — not enabled, but can be done as described below
 
 Artifacts are kept locally under `runs/<run-id>/`. `manifest.json` already carries a
 `storage.remote_uri` slot (currently `null`). To enable durable/shared storage:
@@ -152,15 +155,4 @@ Artifacts are kept locally under `runs/<run-id>/`. `manifest.json` already carri
 2. Tag the MLflow run with that URI (the code already logs `remote_uri` when present).
 3. Point MLflow's `--artifacts-destination` at the same bucket for managed artifacts.
 
-This also unlocks **distributed execution**: with Celery/Kubernetes workers, tasks run on
-different machines, so artifacts must be addressed by URI (S3) rather than a local path,
-and the metadata DB must be Postgres (already the case in compose).
 
-## Known limitations
-
-- DockerOperator-launched workload containers run as root, so files under `run-agent/` /
-  `run-eval/` are root-owned (world-readable; downstream only reads them).
-- In compose, `manifest.provenance` records only `git_commit` (the Airflow image has git
-  but not the project `.venv`); package versions remain pinned in `uv.lock`.
-- MLflow's Host-header (DNS-rebinding) check is relaxed for the internal compose network
-  via `MLFLOW_SERVER_ALLOWED_HOSTS`; scope it tighter for a public deployment.
