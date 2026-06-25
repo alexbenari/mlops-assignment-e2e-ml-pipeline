@@ -1,0 +1,3 @@
+# glob syntax (core.dag_ignore_file_syntax = glob).
+# The pipeline package holds orchestration helpers, not DAG files.
+pipeline/*

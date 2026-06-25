@@ -8,5 +8,13 @@ __pycache__
 
 /logs/
 
+# Pipeline run artifacts (commit a sample run explicitly with `git add -f` if needed)
+/runs/
+
+# Local MLflow server state (created when running `mlflow server` from the repo dir)
+/mlflow.db
+/mlartifacts/
+/mlruns/
+
 mini-swe-agent/
 SWE-bench/
