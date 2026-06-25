@@ -36,9 +36,20 @@ def log_mlflow_run(run_dir: Path, tracking_uri: str | None = None, experiment: s
     )
 
     mlflow.set_tracking_uri(tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
-    mlflow.set_experiment(experiment or os.environ.get("MLFLOW_EXPERIMENT", "evaluate_agent"))
+    exp = mlflow.set_experiment(experiment or os.environ.get("MLFLOW_EXPERIMENT", "evaluate_agent"))
 
-    with mlflow.start_run(run_name=config.get("run_id")):
+    # Idempotent: if a run for this pipeline run_id already exists (e.g. this task is being
+    # retried after a transient MLflow failure), reuse it instead of creating a duplicate.
+    run_id = config.get("run_id")
+    existing = mlflow.search_runs(
+        experiment_ids=[exp.experiment_id],
+        filter_string=f"tags.`mlflow.runName` = '{run_id}'",
+        max_results=1,
+        output_format="list",
+    )
+    start_kwargs = {"run_id": existing[0].info.run_id} if existing else {"run_name": run_id}
+
+    with mlflow.start_run(**start_kwargs):
         mlflow.log_params({k: config[k] for k in PARAM_KEYS if k in config})
         mlflow.log_metrics(
             {k: float(metrics[k]) for k in METRIC_KEYS if isinstance(metrics.get(k), (int, float))}

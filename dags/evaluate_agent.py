@@ -137,7 +137,9 @@ PARAMS = {
     },
 )
 def evaluate_agent():
-    @task(execution_timeout=timedelta(minutes=5))
+    # retries=0: prepare_run is fast and pure (params + mkdir); a failure is a real bug,
+    # not a transient blip, and a retry would mint a new run_id / orphan run dir.
+    @task(execution_timeout=timedelta(minutes=5), retries=0)
     def prepare_run() -> dict:
         """Resolve params into a run config and create runs/<run-id>/ with config.json.
 
