@@ -15,7 +15,7 @@ avoided. The Docker provider must be present in that env -- see run-airflow-stan
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from airflow.providers.docker.operators.docker import DockerOperator
@@ -126,9 +126,18 @@ PARAMS = {
     catchup=False,
     params=PARAMS,
     tags=["mlops", "swebench", "evaluation"],
+    # Baseline for every task: retry transient failures (API blips, flaky container
+    # start) with exponential backoff. Tasks are safe to retry -- run_agent resumes
+    # from preds.json, run_eval just regenerates reports.
+    default_args={
+        "retries": 1,
+        "retry_delay": timedelta(minutes=1),
+        "retry_exponential_backoff": True,
+        "max_retry_delay": timedelta(minutes=10),
+    },
 )
 def evaluate_agent():
-    @task
+    @task(execution_timeout=timedelta(minutes=5))
     def prepare_run() -> dict:
         """Resolve params into a run config and create runs/<run-id>/ with config.json.
 
@@ -149,6 +158,7 @@ def evaluate_agent():
         mounts=COMMON_MOUNTS,
         mount_tmp_dir=False,
         auto_remove="force",
+        execution_timeout=timedelta(hours=4),
         environment={
             "SUBSET": _cfg("subset"),
             "SPLIT": _cfg("split"),
@@ -167,6 +177,7 @@ def evaluate_agent():
         mounts=COMMON_MOUNTS,
         mount_tmp_dir=False,
         auto_remove="force",
+        execution_timeout=timedelta(hours=2),
         environment={
             "DATASET_NAME": _cfg("dataset_name"),
             "SPLIT": _cfg("split"),
@@ -177,7 +188,7 @@ def evaluate_agent():
         },
     )
 
-    @task
+    @task(execution_timeout=timedelta(minutes=10))
     def summarize_and_log(run_config: dict) -> str:
         """Parse eval results into metrics.json, write manifest.json, log to MLflow.
 
@@ -191,7 +202,7 @@ def evaluate_agent():
         write_metrics(metrics, run_dir)
         write_manifest(run_dir, run_config, metrics, PROJECT_ROOT)
         print(f"[summarize_and_log] metrics={metrics}")
-        log_mlflow_run(run_dir, PROJECT_ROOT)
+        log_mlflow_run(run_dir)
         print("[summarize_and_log] logged to MLflow")
         return str(run_dir)
 

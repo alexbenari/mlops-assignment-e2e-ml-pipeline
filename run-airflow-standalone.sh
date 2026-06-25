@@ -8,6 +8,10 @@ mkdir -p $AIRFLOW_HOME
 
 echo '{"admin": "admin"}' > $AIRFLOW_HOME/simple_auth_manager_passwords.json.generated
 
-# --with apache-airflow-providers-docker: makes DockerOperator importable in Airflow's
-# (uvx) environment, so the evaluate_agent DAG can run the agent/eval in containers.
-uv tool run --with apache-airflow-providers-docker apache-airflow standalone
+# Extra packages in Airflow's (uvx) environment:
+#   - apache-airflow-providers-docker: DockerOperator (run the agent/eval in containers)
+#   - mlflow-skinny: summarize_and_log logs params/metrics to the MLflow tracking server
+uv tool run \
+    --with apache-airflow-providers-docker \
+    --with mlflow-skinny \
+    apache-airflow standalone

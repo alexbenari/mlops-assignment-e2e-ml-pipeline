@@ -1,0 +1,17 @@
+# Airflow control-plane image: the official Airflow plus what our DAG needs at
+# parse/run time in Airflow's own interpreter:
+#   - apache-airflow-providers-docker  -> DockerOperator (run_agent / run_eval)
+#   - mlflow-skinny                    -> summarize_and_log logs to the tracking server
+#   - git                              -> manifest provenance (git_commit)
+# The heavy workload still runs in the separate mlops-eval:local image via DockerOperator.
+FROM apache/airflow:3.2.2
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
+USER airflow
+RUN pip install --no-cache-dir \
+    "apache-airflow-providers-docker" \
+    "mlflow-skinny==3.14.0"

@@ -1,0 +1,99 @@
+name: mlops-eval
+
+# Local docker-compose deployment of the control plane:
+#   - postgres : metadata DB for both Airflow and MLflow (separate databases)
+#   - mlflow   : MLflow tracking server (UI + REST), artifacts served by the server
+#   - airflow  : Airflow (standalone: api-server + scheduler + dag-processor) on LocalExecutor
+#
+# The workload (run_agent / run_eval) is NOT a compose service: the DAG launches it via
+# DockerOperator against the host Docker daemon (mounted socket = docker-out-of-docker).
+#
+# Substitution vars come from .env: HOST_PROJECT_DIR, AIRFLOW_UID, DOCKER_GID.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    image: mlops-mlflow:local
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql+psycopg2://airflow:airflow@postgres/mlflow
+      --serve-artifacts --artifacts-destination /mlartifacts
+    environment:
+      # MLflow 3 validates the HTTP Host header (DNS-rebinding protection). Allow the
+      # compose service name (with/without port) so the Airflow container can log via
+      # http://mlflow:5000. (Internal compose network; in a real deployment, scope tighter.)
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow:5000,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000"
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  airflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
+    image: mlops-airflow:local
+    # Seed a stable admin/admin (like run-airflow-standalone.sh) instead of standalone's
+    # random password, then run standalone (api-server + scheduler + dag-processor).
+    command:
+      - bash
+      - -c
+      - |
+        echo '{"admin": "admin"}' > /opt/airflow/simple_auth_manager_passwords.json.generated
+        exec airflow standalone
+    # Run as the host user so files written to the mounted repo/runs are owned by you;
+    # add the host docker group so the mounted socket is usable for DockerOperator.
+    user: "${AIRFLOW_UID}:0"
+    group_add:
+      - "${DOCKER_GID}"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # The repo is mounted at the SAME path as on the host (see volumes), so the DAG's
+      # PROJECT_ROOT equals the host path -> DockerOperator host-path mounts resolve.
+      AIRFLOW__CORE__DAGS_FOLDER: ${HOST_PROJECT_DIR}/dags
+      PYTHONPATH: ${HOST_PROJECT_DIR}/dags
+      # summarize_and_log logs here; mlflow is reachable by service name on the compose net.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT: evaluate_agent
+    volumes:
+      - ${HOST_PROJECT_DIR}:${HOST_PROJECT_DIR}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - airflow-logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-db:
+  mlflow-artifacts:
+  airflow-logs:
