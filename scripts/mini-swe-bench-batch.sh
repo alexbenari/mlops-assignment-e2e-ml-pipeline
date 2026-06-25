@@ -29,9 +29,12 @@ WORKERS="${WORKERS:-4}"
 TASK_SLICE="${TASK_SLICE:-0:3}"
 COST_LIMIT="${COST_LIMIT:-0}"
 OUTPUT_DIR="${OUTPUT_DIR:-trajectories}"
-# Base agent config. Passing any -c drops the built-in default, so we pass this
-# explicitly and then layer the cost_limit override on top.
-CONFIG="${CONFIG:-mini-swe-agent/src/minisweagent/config/benchmarks/swebench.yaml}"
+# Base agent config. Passing any -c drops the built-in default, so we pass the base
+# config explicitly and layer the cost_limit override on top. Default to the INSTALLED
+# package config (present in both the host venv and the Docker image) so we don't depend
+# on the cloned mini-swe-agent repo and we match the pinned package version.
+CONFIG="${CONFIG:-$(ls "$REPO_ROOT"/.venv/lib/python*/site-packages/minisweagent/config/benchmarks/swebench.yaml 2>/dev/null | head -1)}"
+[ -f "$CONFIG" ] || { echo "[batch] agent config not found under .venv: $CONFIG" >&2; exit 1; }
 
 mkdir -p "$OUTPUT_DIR"
 

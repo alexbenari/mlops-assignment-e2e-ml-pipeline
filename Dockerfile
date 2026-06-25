@@ -14,6 +14,9 @@ WORKDIR /mlops-assignment
 COPY pyproject.toml .
 COPY uv.lock .
 
+# Pin the interpreter to match the host venv (the lockfile pins package versions,
+# this pins the Python minor version for full host/image parity).
+ENV UV_PYTHON=3.12
 RUN uv sync --locked
 
 ENV PATH="/mlops-assignment/.venv/bin:$PATH"

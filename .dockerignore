@@ -1,0 +1,16 @@
+# Keep the build context small: the Dockerfile only COPYs pyproject.toml, uv.lock, scripts/.
+.git
+.venv
+.env
+runs/
+mlflow.db
+mlartifacts/
+mlruns/
+mini-swe-agent/
+SWE-bench/
+sample/
+screenshots/
+dags/
+**/__pycache__/
+*.pyc
+.ruff_cache/
