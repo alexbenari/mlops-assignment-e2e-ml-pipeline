@@ -1,0 +1,15 @@
+{
+  "submitted": 1,
+  "completed": 1,
+  "resolved": 1,
+  "unresolved": 0,
+  "empty_patch": 0,
+  "errors": 0,
+  "resolve_rate": 1.0,
+  "resolved_ids": [
+    "astropy__astropy-12907"
+  ],
+  "agent_instances": 1,
+  "api_calls": 14,
+  "total_cost": 0.0
+}
