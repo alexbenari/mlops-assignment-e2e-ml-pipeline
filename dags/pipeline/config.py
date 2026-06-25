@@ -5,6 +5,8 @@ Standard-library only (runs under Airflow's interpreter). See pipeline/__init__.
 from __future__ import annotations
 
 import json
+import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +49,40 @@ def build_run_config(params: dict[str, Any]) -> dict[str, Any]:
         "task_slice": str(params.get("task_slice") or "").strip(),
         "cost_limit": float(params.get("cost_limit") or 0),
     }
+
+
+def validate_run_config(run_config: dict[str, Any], project_root: Path) -> None:
+    """Pre-flight checks for real (non-transient) config problems. Raises ValueError.
+
+    Runs in prepare_run before any expensive task, so misconfigurations fail fast
+    instead of surfacing mid-run (e.g. an auth error after pulling a multi-GB image).
+    """
+    project_root = Path(project_root)
+
+    # Auth: the agent needs NEBIUS_API_KEY, from the environment or the repo .env that the
+    # batch script sources. Check for a non-empty value in either place.
+    has_key = bool(os.environ.get("NEBIUS_API_KEY"))
+    env_file = project_root / ".env"
+    if not has_key and env_file.exists():
+        has_key = any(
+            line.strip().startswith("NEBIUS_API_KEY=") and line.strip() != "NEBIUS_API_KEY="
+            for line in env_file.read_text(encoding="utf-8").splitlines()
+        )
+    if not has_key:
+        raise ValueError("NEBIUS_API_KEY not set (environment or repo .env); the agent cannot authenticate")
+
+    # Dataset must resolve (subset is a known SWE-bench key or an explicit dataset path).
+    if not run_config.get("dataset_name"):
+        raise ValueError(f"could not resolve a dataset for subset={run_config.get('subset')!r}")
+
+    # Workers must be positive.
+    if int(run_config.get("workers", 0)) < 1:
+        raise ValueError(f"workers must be >= 1, got {run_config.get('workers')!r}")
+
+    # task_slice, if given, must look like a Python slice spec ('0:3', ':5', '0:', '0:6:2', '5').
+    task_slice = (run_config.get("task_slice") or "").strip()
+    if task_slice and not re.fullmatch(r"-?\d*(?::-?\d*){0,2}", task_slice):
+        raise ValueError(f"task_slice {task_slice!r} is not a valid slice spec (e.g. '0:3')")
 
 
 def load_run_config(run_dir: Path) -> dict[str, Any]:

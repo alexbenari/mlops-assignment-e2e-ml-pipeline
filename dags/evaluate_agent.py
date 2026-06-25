@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from airflow.exceptions import AirflowFailException
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import Param, dag, get_current_context, task
 from docker.types import Mount
@@ -28,7 +29,7 @@ DAGS_DIR = Path(__file__).resolve().parent
 if str(DAGS_DIR) not in sys.path:
     sys.path.insert(0, str(DAGS_DIR))
 
-from pipeline.config import build_run_config, prepare_run_dir  # noqa: E402
+from pipeline.config import build_run_config, prepare_run_dir, validate_run_config  # noqa: E402
 from pipeline.metrics import collect_metrics, write_manifest, write_metrics  # noqa: E402
 from pipeline.mlflow_log import log_mlflow_run  # noqa: E402
 
@@ -147,6 +148,12 @@ def evaluate_agent():
         """
         params = get_current_context()["params"]
         run_config = build_run_config(params)
+        # Pre-flight: fail fast on real config problems (missing API key, bad params)
+        # before the expensive Docker tasks. AirflowFailException skips retries.
+        try:
+            validate_run_config(run_config, PROJECT_ROOT)
+        except ValueError as e:
+            raise AirflowFailException(f"pre-flight validation failed: {e}") from e
         prepare_run_dir(run_config, runs_root=RUNS_DIR)
         print(f"[prepare_run] run_id={run_config['run_id']}")
         return run_config
